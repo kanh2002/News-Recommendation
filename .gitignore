@@ -1,0 +1,9 @@
+crawl_data/news_dataset/*.jsonl
+crawl_data/news_dataset/*.csv
+crawl_data/news_dataset/models/
+*.pkl
+*.joblib
+*.pt
+*.pth
+*.bin
+*.model
