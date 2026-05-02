@@ -59,3 +59,14 @@ streamlit run dashboard/app.py
 ```
 
 ---
+
+## Todo: 
+
+#### 🔧 Mở rộng ()
+
+Thay vì tính cosine similarity trên toàn bộ dữ liệu (brute-force, chậm khi dữ liệu lớn),mở rộng thay bằng
+
+- **FAISS** or
+- **Milvus**
+
+Giúp tăng tốc độ tìm kiếm và recommendation khi số lượng bài viết lớn.
