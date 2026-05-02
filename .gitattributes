@@ -1,3 +1,8 @@
+crawl_data/news_dataset/models/bertopic_news_model filter=lfs diff=lfs merge=lfs -text
+crawl_data/news_dataset/*.jsonl filter=lfs diff=lfs merge=lfs -text
+track filter=lfs diff=lfs merge=lfs -text
+crawl_data/news_dataset/*.csv filter=lfs diff=lfs merge=lfs -text
+git filter=lfs diff=lfs merge=lfs -text
+lfs filter=lfs diff=lfs merge=lfs -text
 crawl_data/news_dataset/news_dataset.jsonl filter=lfs diff=lfs merge=lfs -text
 crawl_data/news_dataset/news_with_topics.csv filter=lfs diff=lfs merge=lfs -text
-crawl_data/news_dataset/models/bertopic_news_model filter=lfs diff=lfs merge=lfs -text
