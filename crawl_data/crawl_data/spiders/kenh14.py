@@ -28,7 +28,7 @@ class Kenh14Spider(scrapy.Spider):
     ]
 
     custom_settings = {
-        "DEPTH_LIMIT": 150,
+        "DEPTH_LIMIT": 10,
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 2,
     }
@@ -86,20 +86,8 @@ class Kenh14Spider(scrapy.Spider):
             if self.article_pattern.search(link):
                 yield response.follow(link, self.parse_article, meta={"category": category})
 
-        # Follow all listing/pagination links to keep exploring category pages.
-        all_links = response.css("a::attr(href)").getall()
-        for link in all_links:
-            if not link:
-                continue
-            link = link.strip()
-            if not link:
-                continue
-
-            if self.article_pattern.search(link):
-                continue
-
-            if self._should_follow_listing_link(link):
-                yield response.follow(link, self.parse, meta={"category": category})
+        # Không follow listing/pagination link ở đây vì chỉ cần bài viết trên page/category hiện tại.
+        # Nếu follow lung tung thì category sẽ loạn.
 
     def parse_article(self, response):
         """Extract article content"""
@@ -245,29 +233,6 @@ class Kenh14Spider(scrapy.Spider):
                     return p
         return ""
 
-    def _should_follow_listing_link(self, link):
-        lower_link = link.lower()
-        if lower_link.startswith(("javascript:", "mailto:", "tel:", "#")):
-            return False
-
-        parsed = urlsplit(lower_link)
-        path = parsed.path or ""
-        if not path:
-            return False
-
-        # Skip clearly non-listing resources.
-        if any(path.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".css", ".js", ".pdf")):
-            return False
-
-        listing_markers = (
-            "/trang-",
-            "?page=",
-            "/timeline",
-            "/c",
-            ".html",
-        )
-        return any(marker in lower_link for marker in listing_markers)
-
     def _extract_jsonld_objects(self, response):
         objects = []
         scripts = response.xpath("//script[@type='application/ld+json']/text()").getall()
@@ -356,7 +321,7 @@ class Kenh14Spider(scrapy.Spider):
         )
 
         # Ưu tiên nhóm lớn ổn định từ URL/start page để tránh nhánh con như "cine".
-        candidates = [meta_category, section_meta, breadcrumb_category]
+        candidates = [breadcrumb_category, section_meta, meta_category]
         for raw in candidates:
             normalized = normalize_category(raw)
             if normalized in self.canonical_categories:

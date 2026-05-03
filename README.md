@@ -1,72 +1,61 @@
-# 📰 Real-time News Recommendation System (Vietnamese)
+# 📰 Real-time News Recommendation System
 
-## ✅ Pipeline
+## 🚀 Pipeline
 
-```text
-Crawler → Kafka → Redis → Consumer → MongoDB → Streamlit
 ```
----
+Crawler → Kafka → Consumer → MongoDB → Streamlit
+↘ Redis (dedup)
+↘ Milvus (vector search)
 
-## 🏗️ Kiến trúc hệ thống
-
-Crawler (Scrapy)
-→ Kafka (raw-news)
-→ Redis (dedup URL - TTL)
-→ Consumer (Embedding + Processing)
-→ MongoDB (Storage)
-→ Streamlit (Recommendation UI)
-
----
-
-## 🚀 Tính năng chính
-
-- 🔍 Search thông minh (Keyword + Embedding similarity)
-- 🤖 Recommendation:
-  - For You (theo hành vi user)
-  - Similar News (theo từng bài)
-- 📰 Realtime News Feed
-- ⚡ Pipeline realtime (Kafka streaming)
-- 🧹 Chống trùng URL (Redis TTL)
-
----
-
-## 📂 Cấu trúc project
-
-```text
-realtime_news_trend/
-│
-├── crawl_data/        
-├── consumer/          
-├── dashboard/         
-├── docker-compose.yml 
-├── requirements.txt
-└── start_system.bat    
 ```
 
-## ⚙️ Cài đặt & chạy
+---
+
+## 🔥 Features
+
+- 🔍 Semantic Search (Milvus)
+- 🤖 Recommendation (For You, Similar News)
+- ⚡ Realtime pipeline (Kafka)
+- 🧹 Dedup URL & content (Redis + hash)
+
+---
+
+## 📂 Structure
+
+```
+crawl_data/      # Crawlers (Scrapy)
+consumer/        # Kafka consumer + embedding + Milvus
+dashboard/       # Streamlit UI
+common/          # Milvus utils, shared code
+
+```
+
+---
+
+## ⚙️ Run
 
 ```bash
 pip install -r requirements.txt
-docker-compose up -d
+docker compose up -d
 start_system.bat
 ```
 
-Hoặc:
+### Or manual:
+
 ```bash
-python consumer/topic_consumer.py
-python crawl_data/run_all_spiders.py
+python -m consumer.topic_consumer
+cd crawl_data && python run_all_spiders.py
 streamlit run dashboard/app.py
 ```
 
 ---
 
-## Todo: 
+## 🧠 Tech Stack
 
-#### 🔧 Mở rộng ()
+* Python, Scrapy, Streamlit
+* Kafka, Redis, MongoDB
+* Milvus (Vector DB)
+* Sentence-Transformers
 
-Thay vì tính cosine similarity trên toàn bộ dữ liệu (brute-force, chậm khi dữ liệu lớn),mở rộng thay bằng
+---
 
-- **FAISS** or
-- **Milvus**
-
-Giúp tăng tốc độ tìm kiếm và recommendation khi số lượng bài viết lớn.

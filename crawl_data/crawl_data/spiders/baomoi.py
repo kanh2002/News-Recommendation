@@ -25,7 +25,7 @@ class BaomoiSpider(scrapy.Spider):
     ]
 
     custom_settings = {
-        "DEPTH_LIMIT": 120,
+        "DEPTH_LIMIT": 10,
         "DOWNLOAD_DELAY": 0.6,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 2,
     }

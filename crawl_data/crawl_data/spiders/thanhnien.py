@@ -28,7 +28,7 @@ class ThanhNienSpider(scrapy.Spider):
     ]
 
     custom_settings = {
-        "DEPTH_LIMIT": 50,
+        "DEPTH_LIMIT": 10,
         "DOWNLOAD_DELAY": 0.6,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 2,
     }

@@ -1,19 +1,24 @@
-from scrapy.crawler import CrawlerProcess
-from scrapy.utils.project import get_project_settings
+import subprocess
+import time
+from datetime import datetime
 
-
-process = CrawlerProcess(get_project_settings())
-
-spiders = [
-    "baomoi",
+SPIDERS = [
+    "vnexpress",
     "dantri",
-    "kenh14",
     "thanhnien",
     "vietnamnet",
-    "vnexpress",
+    "baomoi",
+    "kenh14",
 ]
 
-for spider in spiders:
-    process.crawl(spider)
+INTERVAL_SECONDS = 300  # 5 phút
 
-process.start()
+while True:
+    print(f"\n===== Crawl cycle started at {datetime.now()} =====")
+
+    for spider in SPIDERS:
+        print(f"\n>>> Running spider: {spider}")
+        subprocess.run(["scrapy", "crawl", spider], check=False)
+
+    print(f"\n===== Crawl cycle finished. Sleeping {INTERVAL_SECONDS}s =====")
+    time.sleep(INTERVAL_SECONDS)

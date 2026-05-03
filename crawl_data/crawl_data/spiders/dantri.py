@@ -1,5 +1,5 @@
 ﻿import scrapy
-
+from crawl_data.category_mapper import normalize_category
 
 class DantriSpider(scrapy.Spider):
     name = "dantri"
@@ -22,7 +22,7 @@ class DantriSpider(scrapy.Spider):
     ]
 
     custom_settings = {
-        "DEPTH_LIMIT": 80,
+        "DEPTH_LIMIT": 10,
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 2,
     }
@@ -48,7 +48,7 @@ class DantriSpider(scrapy.Spider):
         ).getall()
         ignore = {"Trang chủ", "Home", "Dân trí", "Dantri"}
         main_categories = [c.strip() for c in categories if c and c.strip() not in ignore]
-        category = main_categories[0] if main_categories else ""
+        category = normalize_category(main_categories[0]) if main_categories else "Khác"
 
         title = response.css("h1.title-page::text, h1.article-title::text").get()
         description = response.css(

@@ -1,6 +1,6 @@
 ﻿import scrapy
 
-
+from crawl_data.category_mapper import normalize_category
 class VnexpressSpider(scrapy.Spider):
 
     name = "vnexpress"
@@ -31,7 +31,7 @@ class VnexpressSpider(scrapy.Spider):
     ]
 
     custom_settings = {
-        "DEPTH_LIMIT": 100,
+        "DEPTH_LIMIT": 10,
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 2,
     }
@@ -68,7 +68,7 @@ class VnexpressSpider(scrapy.Spider):
         ).getall()
         ignore = {"Trang chủ", "Home", "VnExpress"}
         main_categories = [c for c in categories if c not in ignore]
-        category = main_categories[0] if main_categories else ""
+        category = normalize_category(main_categories[0]) if main_categories else "Khác"
 
         
 

@@ -22,7 +22,7 @@ class VietnamnetSpider(scrapy.Spider):
     ]
 
     custom_settings = {
-        "DEPTH_LIMIT": 80,
+        "DEPTH_LIMIT": 10,
         "DOWNLOAD_DELAY": 0.5,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 2,
         "SEEN_URLS_PATH": "seen_urls_vietnamnet.txt",
@@ -56,19 +56,8 @@ class VietnamnetSpider(scrapy.Spider):
             if self.article_pattern.search(link):
                 yield response.follow(link, self.parse_article, meta={"category": category})
 
-        listing_links = response.css("a::attr(href)").getall()
-        for link in listing_links:
-            if not link:
-                continue
-            link = link.strip()
-            if not link:
-                continue
-
-            if self.article_pattern.search(link):
-                continue
-
-            if self._should_follow_listing_link(link):
-                yield response.follow(link, self.parse, meta={"category": category})
+        # Không follow listing/pagination link ở đây.
+        # Chỉ lấy bài viết trên page/category hiện tại để tránh loạn category.
 
     def parse_article(self, response):
         raw_category = response.meta.get("category", "")
@@ -104,25 +93,3 @@ class VietnamnetSpider(scrapy.Spider):
                 "image_count": len(images),
                 "word_count": len(content.split()),
             }
-
-    def _should_follow_listing_link(self, link):
-        lower_link = link.lower()
-        if lower_link.startswith(("javascript:", "mailto:", "tel:", "#")):
-            return False
-
-        parsed = urlsplit(lower_link)
-        path = parsed.path or ""
-        if not path:
-            return False
-
-        if any(path.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".css", ".js", ".pdf")):
-            return False
-
-        listing_markers = (
-            "/trang-",
-            "?page=",
-            "/timeline",
-            "/tin-",
-            "/su-kien/",
-        )
-        return any(marker in lower_link for marker in listing_markers)

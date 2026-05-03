@@ -40,7 +40,7 @@ CONCURRENT_REQUESTS_PER_DOMAIN = 8
 DOWNLOAD_DELAY = 0.25  # Giảm delay
 
 # Tăng depth limit
-DEPTH_LIMIT = 50
+DEPTH_LIMIT = 10
 
 # Tắt robots.txt nếu cần (không khuyến khích)
 # ROBOTSTXT_OBEY = False
