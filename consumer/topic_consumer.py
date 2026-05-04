@@ -53,9 +53,26 @@ consumer = KafkaConsumer(
 
 mongo = MongoClient(MONGO_URI)
 collection = mongo[DB_NAME][COLLECTION_NAME]
+mongo = MongoClient(MONGO_URI)
+collection = mongo[DB_NAME][COLLECTION_NAME]
+
+# ===== Basic index =====
+mongo = MongoClient(MONGO_URI)
+collection = mongo[DB_NAME][COLLECTION_NAME]
+
 collection.create_index("url")
 collection.create_index("content_hash")
 collection.create_index("processed_at")
+collection.create_index("publish_date")
+
+collection.create_index("category")
+collection.create_index("source")
+
+collection.create_index([("publish_date", -1), ("processed_at", -1)])
+collection.create_index([("category", 1), ("publish_date", -1)])
+collection.create_index([("source", 1), ("publish_date", -1)])
+collection.create_index([("category", 1), ("source", 1), ("publish_date", -1)])
+
 redis_client = redis.Redis(
     host=REDIS_HOST,
     port=REDIS_PORT,

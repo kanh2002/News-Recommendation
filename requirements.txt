@@ -10,14 +10,14 @@ requests==2.32.3
 urllib3==2.2.2
 charset-normalizer==3.3.2
 chardet==5.2.0
-
+fastapi
 pandas
 numpy
 streamlit
 streamlit-autorefresh
 plotly
 extra-streamlit-components
-
+uvicorn
 torch==2.3.1
 torchvision==0.18.1
 sentence-transformers==3.0.1

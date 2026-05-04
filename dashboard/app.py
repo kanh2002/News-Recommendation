@@ -7,7 +7,8 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
 import sys
 from datetime import datetime, timedelta
-
+import html
+import textwrap
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -20,7 +21,65 @@ sys.path.append(ROOT_DIR)
 from common.milvus_utils import search_vectors, get_or_create_collection
 
 st.set_page_config(page_title="News Recommendation System", layout="wide", page_icon="📰")
+st.markdown("""
+<style>
+.news-card {
+    background: #111827;
+    border: 1px solid #1f2937;
+    border-radius: 16px;
+    padding: 18px 20px;
+    margin-top: 14px;
+    margin-bottom: 8px;
+}
 
+.news-card:hover {
+    border-color: #334155;
+    background: #131c2e;
+}
+
+.news-meta {
+    color: #94a3b8;
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+
+.news-title {
+    color: #e5e7eb !important;
+    font-size: 19px;
+    font-weight: 700;
+    line-height: 1.35;
+    text-decoration: none !important;
+}
+
+.news-title:hover {
+    color: #93c5fd !important;
+}
+
+.news-desc {
+    color: #cbd5e1;
+    font-size: 14.5px;
+    line-height: 1.55;
+    margin-top: 8px;
+}
+
+/* làm button nhỏ lại, không bị thô */
+.stButton > button {
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    background: transparent;
+    border: 1px solid #334155;
+    color: #cbd5e1;
+    font-size: 13px;
+    min-height: 34px;
+}
+
+.stButton > button:hover {
+    background: #1e293b;
+    border-color: #60a5fa;
+    color: #ffffff;
+}
+</style>
+""", unsafe_allow_html=True)
 # =====================
 # CONFIG
 # =====================
@@ -37,11 +96,12 @@ EMBEDDING_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12
 
 # Ranking weights, no trained ranking model needed
 WEIGHTS = {
-    "similarity": 0.58,
-    "freshness": 0.16,
-    "category": 0.10,
-    "trend": 0.10,
-    "diversity": 0.06,
+    "similarity": 0.70,
+    "freshness": 0.1,
+    "category": 0.15,
+    "source": 0.025,
+    "diversity": 0.00,
+    "popularity": 0.025,
 }
 
 QUERY_EXPANSION = {
@@ -90,6 +150,49 @@ except Exception as e:
 # =====================
 # DATA LOADING
 # =====================
+@st.cache_data(ttl=120, show_spinner=False)
+def load_articles_page(category="Tất cả", source="Tất cả", page=1, page_size=10):
+    query = {
+        "title": {"$exists": True, "$ne": ""},
+    }
+
+    if category != "Tất cả":
+        query["category"] = category
+
+    if source != "Tất cả":
+        query["source"] = source
+
+    skip = (page - 1) * page_size
+
+    projection = {
+        "_id": 1,
+        "url": 1,
+        "title": 1,
+        "description": 1,
+        "category": 1,
+        "source": 1,
+        "date": 1,
+        "publish_date": 1,
+        "processed_at": 1,
+    }
+
+    docs = list(
+        articles_col.find(query, projection)
+        .sort([("publish_date", -1), ("processed_at", -1)])
+        .skip(skip)
+        .limit(page_size)
+    )
+
+    total = articles_col.count_documents(query)
+
+    if not docs:
+        return pd.DataFrame(), total
+
+    result_df = pd.DataFrame(docs)
+    result_df["_id"] = result_df["_id"].astype(str)
+    result_df = parse_dates_for_result(result_df)
+
+    return result_df, total
 @st.cache_data(ttl=300, show_spinner=False)
 def load_all_articles():
     docs = list(
@@ -214,6 +317,38 @@ def parse_dates_for_result(result_df):
         result_df[col] = result_df[col].fillna("").astype(str)
     return result_df
 
+def get_article_cards_by_ids(article_ids):
+    if not article_ids:
+        return pd.DataFrame()
+
+    docs = list(
+        articles_col.find(
+            {"_id": {"$in": article_ids}},
+            {
+                "_id": 1,
+                "url": 1,
+                "title": 1,
+                "description": 1,
+                "category": 1,
+                "source": 1,
+                "date": 1,
+                "publish_date": 1,
+                "processed_at": 1,
+            },
+        )
+    )
+
+    if not docs:
+        return pd.DataFrame()
+
+    result_df = pd.DataFrame(docs)
+    result_df["_id"] = result_df["_id"].astype(str)
+
+    order = {article_id: i for i, article_id in enumerate(article_ids)}
+    result_df["_order"] = result_df["_id"].map(order)
+    result_df = result_df.sort_values("_order").drop(columns=["_order"])
+
+    return parse_dates_for_result(result_df)
 
 def get_articles_by_ids(article_ids):
     if not article_ids:
@@ -258,7 +393,43 @@ def _trend_keys(hours_back=8):
         ])
     return keys
 
+@st.cache_data(ttl=180, show_spinner=False)
+def load_recent_articles_with_embeddings(limit=500):
+    docs = list(
+        articles_col.find(
+            {
+                "embedding": {"$exists": True, "$ne": []},
+                "title": {"$exists": True, "$ne": ""},
+            },
+            {
+                "_id": 1,
+                "url": 1,
+                "title": 1,
+                "description": 1,
+                "category": 1,
+                "source": 1,
+                "date": 1,
+                "publish_date": 1,
+                "processed_at": 1,
+                "embedding": 1,
+            },
+        )
+        .sort([("publish_date", -1), ("processed_at", -1)])
+        .limit(limit)
+    )
 
+    if not docs:
+        return pd.DataFrame(), np.array([])
+
+    result_df = pd.DataFrame(docs)
+    result_df["_id"] = result_df["_id"].astype(str)
+    result_df = parse_dates_for_result(result_df)
+
+    embeddings = np.stack(
+        result_df["embedding"].apply(lambda x: np.array(x, dtype=np.float32)).values
+    )
+
+    return result_df, embeddings
 @st.cache_data(ttl=60, show_spinner=False)
 def load_trend_counts(hours_back=8):
     counts = {}
@@ -277,21 +448,22 @@ def load_trend_counts(hours_back=8):
 
 def add_trend_features(input_df):
     out = input_df.copy()
-    trend_counts = load_trend_counts(hours_back=8)
-    if not trend_counts:
-        out["trend_raw"] = 0.0
-        out["trend_score"] = 0.0
-        return out
-    out["trend_raw"] = out["category"].map(lambda x: trend_counts.get(str(x), 0.0)).fillna(0.0)
-    max_v = float(out["trend_raw"].max()) if len(out) else 0.0
-    out["trend_score"] = out["trend_raw"] / max_v if max_v > 0 else 0.0
+    # Calculate popularity_score based on category counts (similar to evaluation.py)
+    category_counts = out["category"].value_counts()
+    raw = out["category"].map(category_counts).fillna(0).astype(float)
+    max_v = float(raw.max()) if len(raw) > 0 else 1.0
+    out["popularity_score"] = raw / max_v if max_v > 0 else 0.0
+    
+    # Calculate source_score (for now, set to 0, can be enhanced with user preference)
+    out["source_score"] = 0.0
+    
     return out
 
 
 def get_trending_articles(top_n=10):
     trend_df = add_trend_features(df)
     trend_df["freshness_score"] = get_freshness_score(trend_df["pub_date"]).values
-    trend_df["hot_score"] = 0.65 * trend_df["trend_score"] + 0.35 * trend_df["freshness_score"]
+    trend_df["hot_score"] = 0.65 * trend_df["popularity_score"] + 0.35 * trend_df["freshness_score"]
     return trend_df.sort_values(["hot_score", "pub_date"], ascending=[False, False]).head(top_n)
 
 # =====================
@@ -415,6 +587,9 @@ def log_interaction(article_id, action):
 def handle_interaction(action, article_id):
     prof = st.session_state.user_profile
 
+    if article_id not in prof["viewed"]:
+        prof["viewed"].append(article_id)
+
     if article_id not in prof[action]:
         prof[action].append(article_id)
 
@@ -482,7 +657,8 @@ def score_recommendations(candidate_df, score_map=None):
         WEIGHTS["similarity"] * out["similarity_score"]
         + WEIGHTS["freshness"] * out["freshness_score"]
         + WEIGHTS["category"] * out["category_score"]
-        + WEIGHTS["trend"] * out["trend_score"]
+        + WEIGHTS["source"] * out["source_score"]
+        + WEIGHTS["popularity"] * out["popularity_score"]
         + WEIGHTS["diversity"] * out["diversity_score"]
     )
 
@@ -494,24 +670,43 @@ def score_recommendations(candidate_df, score_map=None):
 def get_recommendations(top_k=40):
     prof = st.session_state.user_profile
     profile_vec = prof.get("profile_vector")
+
+    # 1. Nếu đã có profile vector thì ưu tiên Milvus
     if profile_vec is not None:
         try:
-            hits = search_vectors([float(x) for x in profile_vec], top_k=top_k)
+            hits = search_vectors(
+                [float(x) for x in profile_vec],
+                top_k=max(top_k * 3, 80)
+            )
+
             ids = [h["article_id"] for h in hits]
             score_map = {h["article_id"]: h["score"] for h in hits}
-            rec_df = get_articles_by_ids(ids)
-            if not rec_df.empty:
-                return score_recommendations(rec_df, score_map=score_map)
-        except Exception as e:
-            st.warning(f"Milvus search lỗi, fallback sang cosine local: {e}")
 
-    # Fallback/cold-start ranking
-    candidate = df.copy()
+            rec_df = get_articles_by_ids(ids)
+
+            if not rec_df.empty:
+                scored = score_recommendations(rec_df, score_map=score_map)
+                return scored.head(top_k)
+
+        except Exception as e:
+            st.warning(f"Milvus search lỗi, fallback sang recent cosine local: {e}")
+
+    # 2. Fallback/cold-start: chỉ lấy bài mới nhất, không dùng toàn bộ df
+    candidate, recent_embeddings = load_recent_articles_with_embeddings(limit=500)
+
+    if candidate.empty or len(recent_embeddings) == 0:
+        return pd.DataFrame()
+
     if profile_vec is not None:
-        candidate["similarity_score"] = compute_cosine_similarity(profile_vec, doc_embeddings)[0]
+        candidate["similarity_score"] = compute_cosine_similarity(
+            profile_vec,
+            recent_embeddings
+        )[0]
     else:
         candidate["similarity_score"] = 0.0
+
     scored = score_recommendations(candidate, score_map=None)
+
     return scored.head(top_k)
 
 
@@ -568,7 +763,7 @@ def milvus_search_text(query, top_k=30):
     result_df["final_score"] = (
         0.55 * result_df["keyword_score_norm"]
         + 0.35 * result_df["embedding_score"]
-        + 0.10 * result_df["trend_score"]
+        + 0.10 * result_df["popularity_score"]
     )
     return result_df.sort_values(by=["keyword_score", "final_score"], ascending=[False, False]).reset_index(drop=True)
 
@@ -697,7 +892,7 @@ def explain_recommendation(row):
         reasons.append("nội dung gần với lịch sử đọc")
     if float(row.get("category_score", 0)) > 0:
         reasons.append(f"thuộc chuyên mục bạn chọn: {safe_text(row.get('category'))}")
-    if float(row.get("trend_score", 0)) > 0.2:
+    if float(row.get("popularity_score", 0)) > 0.2:
         reasons.append("chuyên mục đang có xu hướng")
     if float(row.get("freshness_score", 0)) > 0.55:
         reasons.append("tin khá mới")
@@ -710,7 +905,7 @@ def render_similar_block(article_id):
     if st.session_state.get("selected_similar_article") != article_id:
         return
     similar_df = get_similar_articles(article_id, top_k=6, multi_hop=True)
-    with st.expander("⭐ Các bài báo tương tự / multi-hop", expanded=True):
+    with st.expander("⭐ Các bài báo tương tự", expanded=True):
         if similar_df.empty:
             st.info("Không tìm thấy bài tương tự.")
         else:
@@ -720,54 +915,63 @@ def render_similar_block(article_id):
                     # f"— độ tương đồng: `{float(sim_row.get('sim', 0)):.3f}`"
                 )
 
-
 def render_article_card(row, show_interactions=True, key_suffix="", show_reason=False):
-    title = safe_text(row.get("title"), "Đang cập nhật tiêu đề")
+    import html
+
+    title = html.escape(safe_text(row.get("title"), "Đang cập nhật tiêu đề"))
     url = safe_text(row.get("url"), "#")
-    category = safe_text(row.get("category"), "Không rõ")
-    source = safe_text(row.get("source"), "Internet")
+    category = html.escape(safe_text(row.get("category"), "Không rõ"))
+    source = html.escape(safe_text(row.get("source"), "Internet"))
+
     desc = safe_text(row.get("description"), "")
-    if len(desc) > 300:
-        desc = desc[:300] + "..."
+    if len(desc) > 190:
+        desc = desc[:190] + "..."
+    desc = html.escape(desc)
+
     raw_date = safe_text(row.get("date"), "").strip()
     if raw_date:
         date_text = raw_date
     else:
         date = row.get("pub_date", "")
-        date_text = str(date)[:19] if date is not None and str(date) != "NaT" else "Không rõ ngày đăng"
+        date_text = str(date)[:16] if date is not None and str(date) != "NaT" else "Không rõ"
 
     meta = f"{source} • {category} • {date_text}"
-    st.markdown(f"""
-<div style="padding:14px 4px; border-bottom:1px solid #3c4043; margin-bottom:10px;">
-  <div style="font-size:12px; color:#bdc1c6; margin-bottom:5px;"><b>{meta}</b></div>
-  <a href="{url}" target="_blank" style="text-decoration:none; font-size:20px; font-weight:650; color:#8ab4f8; line-height:1.35;">{title}</a>
-  <div style="font-size:14px; color:#e8eaed; line-height:1.5; margin-top:7px;">{desc if desc else 'Nhấn vào tiêu đề để đọc chi tiết.'}</div>
-</div>
-""", unsafe_allow_html=True)
 
-    # if show_reason:
-    #     st.caption("💡 Vì sao gợi ý: " + explain_recommendation(row))
+    with st.container():
+        st.markdown(
+            f"""
+            <div class="news-card">
+                <div class="news-meta">{meta}</div>
+                <a href="http://localhost:8000/track?article_id={row['_id']}" target="_blank" class="news-title">{title}</a>
+                <div class="news-desc">{desc if desc else "Nhấn để đọc chi tiết."}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-    if show_interactions:
-        c1, c2, c3, c4, c5 = st.columns([1, 1.2, 1.1, 1, 5])
-        with c1:
-            if st.button("👁️ Đọc", key=f"read_{row['_id']}_{key_suffix}"):
-                handle_interaction("viewed", row["_id"])
-        with c2:
-            if st.button("👍 Quan tâm", key=f"like_{row['_id']}_{key_suffix}"):
-                handle_interaction("liked", row["_id"])
-        with c3:
-            if st.button("👎 Bỏ qua", key=f"dislike_{row['_id']}_{key_suffix}"):
-                handle_interaction("disliked", row["_id"])
-        with c4:
-            if st.button("💾 Lưu", key=f"save_{row['_id']}_{key_suffix}"):
-                handle_interaction("saved", row["_id"])
-        with c5:
-            if st.button("🔗 Tương tự", key=f"similar_btn_{row['_id']}_{key_suffix}"):
-                st.session_state.selected_similar_article = None if st.session_state.selected_similar_article == row["_id"] else row["_id"]
-        render_similar_block(row["_id"])
+        if show_interactions:
+            c1, c2, c3, c4, spacer = st.columns([0.9, 1.2, 0.9, 1.1, 5])
 
+            with c1:
+                if st.button("👍 Thích", key=f"like_{row['_id']}_{key_suffix}"):
+                    handle_interaction("liked", row["_id"])
 
+            with c2:
+                if st.button("👎 Không thích", key=f"dislike_{row['_id']}_{key_suffix}"):
+                    handle_interaction("disliked", row["_id"])
+
+            with c3:
+                if st.button("💾 Lưu", key=f"save_{row['_id']}_{key_suffix}"):
+                    handle_interaction("saved", row["_id"])
+
+            with c4:
+                if st.button("🔗 Tương tự", key=f"similar_btn_{row['_id']}_{key_suffix}"):
+                    st.session_state.selected_similar_article = (
+                        None
+                        if st.session_state.selected_similar_article == row["_id"]
+                        else row["_id"]
+                    )
+            render_similar_block(row["_id"])
 if "user_profile" not in st.session_state:
     st.session_state.user_profile = load_user_profile()
 if "is_cold_start" not in st.session_state:
@@ -776,6 +980,7 @@ if "selected_similar_article" not in st.session_state:
     st.session_state.selected_similar_article = None
 
 update_user_profile()
+
 
 # =====================
 # COLD START
@@ -805,52 +1010,94 @@ if st.session_state.is_cold_start:
 # =====================
 # MAIN APP
 # =====================
-st.title("📰 News Recommendation System")
+st.markdown("""
+<h1 style='text-align: center;'>📰 News Recommendation System</h1>
+""", unsafe_allow_html=True)
 
 
-page = st.radio(
-    "Điều hướng",
-    ["🏠 Trang chủ", "✨ Dành cho bạn", "🔥 Đang hot", "🔍 Tìm kiếm", "👤 Hồ sơ của tôi"],
-    horizontal=True,
-    key="current_page",
-    label_visibility="collapsed",
-)
+# =====================
+# TABS NAVIGATION
+# =====================
+tab_home, tab_recommend, tab_trend, tab_search, tab_profile = st.tabs([
+    "🏠 Trang chủ",
+    "✨ Dành cho bạn",
+    "🔥 Đang hot",
+    "🔍 Tìm kiếm",
+    "👤 Hồ sơ của tôi",
+])
 
-if page == "🏠 Trang chủ":
+# =====================
+# HOME
+# =====================
+with tab_home:
     st.subheader("🏠 Tin tức tổng hợp")
-    col1, col2 = st.columns(2)
-    with col1:
-        cat_filter = st.selectbox("Lọc theo chuyên mục", ["Tất cả"] + sorted(df["category"].dropna().astype(str).unique().tolist()))
-    with col2:
-        src_filter = st.selectbox("Lọc theo nguồn báo", ["Tất cả"] + sorted(df["source"].dropna().astype(str).unique().tolist()))
-    filtered_df = df.copy()
-    if cat_filter != "Tất cả":
-        filtered_df = filtered_df[filtered_df["category"].astype(str) == cat_filter]
-    if src_filter != "Tất cả":
-        filtered_df = filtered_df[filtered_df["source"].astype(str) == src_filter]
-    st.write(f"Hiển thị {min(10, len(filtered_df))}/{len(filtered_df)} bài viết.")
-    for _, row in filtered_df.head(10).iterrows():
-        render_article_card(row, key_suffix="home")
 
-elif page == "✨ Dành cho bạn":
+    col1, col2 = st.columns(2)
+
+    with col1:
+        cat_filter = st.selectbox(
+            "Lọc theo chuyên mục",
+            ["Tất cả"] + sorted(df["category"].dropna().astype(str).unique().tolist()),
+            key="home_cat_filter"
+        )
+
+    with col2:
+        src_filter = st.selectbox(
+            "Lọc theo nguồn báo",
+            ["Tất cả"] + sorted(df["source"].dropna().astype(str).unique().tolist()),
+            key="home_src_filter"
+        )
+
+    page_size = 10
+
+    if "home_page" not in st.session_state:
+        st.session_state.home_page = 1
+
+    home_df, total_articles = load_articles_page(
+        category=cat_filter,
+        source=src_filter,
+        page=st.session_state.home_page,
+        page_size=page_size
+    )
+
+
+    for _, row in home_df.iterrows():
+        render_article_card(row, key_suffix=f"home_{st.session_state.home_page}")
+
+    prev_col, next_col, _ = st.columns([1, 1, 6])
+
+    with prev_col:
+        if st.button("⬅️ Trước", disabled=st.session_state.home_page <= 1):
+            st.session_state.home_page -= 1
+            st.rerun()
+
+    with next_col:
+        max_page = max(1, int(np.ceil(total_articles / page_size)))
+        if st.button("Tiếp ➡️", disabled=st.session_state.home_page >= max_page):
+            st.session_state.home_page += 1
+            st.rerun()
+
+
+# =====================
+# FOR YOU
+# =====================
+with tab_recommend:
     st.subheader("✨ Đề xuất dành riêng cho bạn")
+
     rec_df = get_recommendations(top_k=50)
+
     if rec_df.empty:
         st.info("Chưa tìm thấy bài phù hợp.")
     else:
-        # metric_cols = st.columns(4)
-        # metric_cols[0].metric("Ứng viên", len(rec_df))
-        # metric_cols[1].metric("Trung bình similarity", f"{rec_df['similarity_score'].mean():.3f}")
-        # metric_cols[2].metric("Trend score TB", f"{rec_df['trend_score'].mean():.3f}")
-        # metric_cols[3].metric("Freshness TB", f"{rec_df['freshness_score'].mean():.3f}")
-        # st.write("---")
         for _, row in rec_df.head(10).iterrows():
             render_article_card(row, key_suffix="foryou", show_reason=True)
 
-elif page == "🔥 Đang hot":
-    st.subheader("🔥 Tin đang hot")
 
-    # st.caption("Tin đang hot được xếp hạng theo độ mới, độ uy tín nguồn và tương tác gần đây trong hệ thống.")
+# =====================
+# TREND
+# =====================
+with tab_trend:
+    st.subheader("🔥 Tin đang hot")
 
     trend_df = get_trending_articles(top_k=10)
 
@@ -860,66 +1107,116 @@ elif page == "🔥 Đang hot":
         for _, row in trend_df.iterrows():
             render_article_card(row, key_suffix="trend")
 
-elif page == "🔍 Tìm kiếm":
+
+# =====================
+# SEARCH
+# =====================
+with tab_search:
     st.subheader("🔍 Tìm kiếm bài viết")
+
     def set_search_query(q):
         st.session_state.search_query = q
+
     if "search_query" not in st.session_state:
         st.session_state.search_query = ""
+
     query = st.text_input("Nhập từ khóa tìm kiếm...", key="search_query")
     query = query.strip() if isinstance(query, str) else ""
+
     if not query:
         st.write("Gợi ý phổ biến:")
+
         col_a, col_b, col_c, col_d = st.columns(4)
-        with col_a: st.button("📈 Giá vàng", use_container_width=True, on_click=set_search_query, args=("giá vàng",))
-        with col_b: st.button("⛈️ Thời tiết - Bão", use_container_width=True, on_click=set_search_query, args=("dự báo thời tiết bão",))
-        with col_c: st.button("⚽ Bóng đá", use_container_width=True, on_click=set_search_query, args=("kết quả bóng đá",))
-        with col_d: st.button("📉 Chứng khoán", use_container_width=True, on_click=set_search_query, args=("chứng khoán vnindex",))
+
+        with col_a:
+            st.button("📈 Giá vàng", use_container_width=True,
+                      on_click=set_search_query, args=("giá vàng",))
+
+        with col_b:
+            st.button("⛈️ Thời tiết", use_container_width=True,
+                      on_click=set_search_query, args=("dự báo thời tiết bão",))
+
+        with col_c:
+            st.button("⚽ Bóng đá", use_container_width=True,
+                      on_click=set_search_query, args=("kết quả bóng đá",))
+
+        with col_d:
+            st.button("📉 Chứng khoán", use_container_width=True,
+                      on_click=set_search_query, args=("chứng khoán vnindex",))
+
     else:
         st.button("❌ Bỏ tìm kiếm", on_click=set_search_query, args=("",))
+
         try:
-            with st.spinner("Đang tìm kiếm bằng Milvus + keyword + trend..."):
+            with st.spinner("Đang tìm kiếm..."):
                 search_df = milvus_search_text(query, top_k=40)
+
         except Exception as e:
-            st.warning(f"Milvus search lỗi, fallback sang cosine local: {e}")
+            st.warning(f"Milvus lỗi, fallback: {e}")
+
             expanded = expand_query(query)
             model = ensure_embedding_model()
             q_vec = model.encode([expanded], normalize_embeddings=True)[0]
+
             sims = compute_cosine_similarity(q_vec, doc_embeddings)[0]
+
             search_df = df.copy()
             search_df["embedding_score"] = sims
             search_df = keyword_score_df(search_df, query)
             search_df = add_trend_features(search_df)
-            search_df["final_score"] = 0.55 * search_df["keyword_score_norm"] + 0.35 * search_df["embedding_score"] + 0.10 * search_df["trend_score"]
-            search_df = search_df.sort_values(by=["keyword_score", "final_score"], ascending=[False, False]).head(30)
+
+            search_df["final_score"] = (
+                0.55 * search_df["keyword_score_norm"]
+                + 0.35 * search_df["embedding_score"]
+                + 0.10 * search_df["popularity_score"]
+            )
+
+            search_df = search_df.sort_values(
+                by=["keyword_score", "final_score"],
+                ascending=[False, False]
+            ).head(30)
+
         if search_df.empty:
             st.warning("Không tìm thấy bài viết phù hợp.")
         else:
             for _, row in search_df.head(10).iterrows():
                 render_article_card(row, key_suffix="search")
 
-elif page == "👤 Hồ sơ của tôi":
+
+# =====================
+# PROFILE
+# =====================
+with tab_profile:
     prof = st.session_state.user_profile
+
     st.subheader("👤 Hồ sơ người dùng")
+
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Tin đã đọc", len(prof.get("viewed", [])))
-    c2.metric("Tin quan tâm", len(prof.get("liked", [])))
-    c3.metric("Tin bỏ qua", len(prof.get("disliked", [])))
-    c4.metric("Tin đã lưu", len(prof.get("saved", [])))
 
-    st.write("**Chuyên mục quan tâm ban đầu:**", ", ".join(prof.get("initial_interests", [])) or "Chưa có")
-    st.write("**Mô tả sở thích:**", prof.get("interest_text", "") or "Chưa có")
+    c1.metric("Đã đọc", len(prof.get("viewed", [])))
+    c2.metric("Thích", len(prof.get("liked", [])))
+    c3.metric("Bỏ qua", len(prof.get("disliked", [])))
+    c4.metric("Đã lưu", len(prof.get("saved", [])))
 
-    interacted_ids = list(set(prof.get("viewed", []) + prof.get("liked", []) + prof.get("saved", [])))
+    st.write("**Chuyên mục quan tâm:**", ", ".join(prof.get("initial_interests", [])) or "Chưa có")
+    st.write("**Sở thích:**", prof.get("interest_text", "") or "Chưa có")
+
+    interacted_ids = list(set(
+        prof.get("viewed", []) +
+        prof.get("liked", []) +
+        prof.get("saved", [])
+    ))
+
     if interacted_ids:
         interacted_df = df[df["_id"].isin(interacted_ids)]
+
         left, right = st.columns(2)
+
         with left:
-            st.write("### Phân bố chuyên mục đã tương tác")
-            fig = px.pie(interacted_df, names="category", title="Chuyên mục người dùng quan tâm")
+            fig = px.pie(interacted_df, names="category")
             st.plotly_chart(fig, use_container_width=True)
+
         with right:
-            st.write("### Chuyên mục quan tâm nhất")
             topic_count = (
                 interacted_df["category"]
                 .replace("", "Không rõ")
@@ -928,20 +1225,30 @@ elif page == "👤 Hồ sơ của tôi":
                 .head(10)
                 .reset_index()
             )
-            topic_count.columns = ["Chuyên mục", "Số lượt tương tác"]
+
+            topic_count.columns = ["Chuyên mục", "Số lượt"]
             st.dataframe(topic_count, use_container_width=True, hide_index=True)
+
     else:
         st.info("Chưa có lịch sử tương tác.")
 
     st.write("---")
-    new_interest_text = st.text_area("Cập nhật mô tả sở thích", value=prof.get("interest_text", ""), height=90)
-    col_a, col_b = st.columns([1, 1])
+
+    new_interest_text = st.text_area(
+        "Cập nhật sở thích",
+        value=prof.get("interest_text", ""),
+        height=90
+    )
+
+    col_a, col_b = st.columns(2)
+
     with col_a:
-        if st.button("💾 Lưu mô tả sở thích"):
+        if st.button("💾 Lưu"):
             st.session_state.user_profile["interest_text"] = new_interest_text.strip()
             update_user_profile()
             save_user_profile()
-            st.success("Đã lưu mô tả sở thích.")
+            st.success("Đã lưu")
+
     with col_b:
-        if st.button("🧹 Reset hồ sơ người dùng", type="secondary"):
+        if st.button("🧹 Reset"):
             reset_user_profile()

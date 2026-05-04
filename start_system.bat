@@ -24,16 +24,21 @@ start "Topic Consumer" cmd /k ""%CONDA_BAT%" activate %ENV_NAME% && cd /d "%ROOT
 
 timeout /t 4 >NUL
 
-start "Dashboard" cmd /k ""%CONDA_BAT%" activate %ENV_NAME% && cd /d "%ROOT_DIR%" && streamlit run dashboard\app.py"
+start "Click Tracking Backend" cmd /k ""%CONDA_BAT%" activate %ENV_NAME% && cd /d "%ROOT_DIR%" && python -m uvicorn dashboard.backend_click:app --reload --host 127.0.0.1 --port 8000"
 
-@REM timeout /t 3 >NUL
+timeout /t 3 >NUL
 
-@REM start "Push Old Data" cmd /k ""%CONDA_BAT%" activate %ENV_NAME% && cd /d "%ROOT_DIR%" && python consumer\push_old_data.py"
+start "Dashboard" cmd /k ""%CONDA_BAT%" activate %ENV_NAME% && cd /d "%ROOT_DIR%" && python -m streamlit run dashboard/app.py"
 
 timeout /t 3 >NUL
 
 start "Crawler" cmd /k ""%CONDA_BAT%" activate %ENV_NAME% && cd /d "%ROOT_DIR%crawl_data" && python run_all_spiders.py"
 
+
+
+===== Optional: Evaluation =====
+
+start "Evaluation" cmd /k ""%CONDA_BAT%" activate %ENV_NAME% && cd /d "%ROOT_DIR%" && python -m evaluation.evaluate_recommender"
 echo.
 echo All services started.
 pause

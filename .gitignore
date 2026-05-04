@@ -7,3 +7,6 @@ crawl_data/news_dataset/models/
 *.pth
 *.bin
 *.model
+
+# Ignore Milvus persistent DB files and large volumes
+/volumes/
